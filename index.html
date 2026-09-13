@@ -63,9 +63,12 @@
   .pchoice{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:600 13px inherit;cursor:pointer;min-width:42px}
   .pchoice:hover:not(:disabled){border-color:var(--accent)}
   .pchoice:disabled{opacity:.45;cursor:default}
-  #jamBoard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
-  #jamBoard svg{display:block}
+  #jamBoard,#chordBoard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
+  #jamBoard svg,#chordBoard svg{display:block}
   #jam .pracbar b{color:var(--accent)}
+  .chordResult{min-height:6px;margin:6px 0 12px}
+  .cname{font-size:30px;font-weight:800}
+  .cname .accent{color:var(--accent)}
 
   #result{margin-top:6px}
   .verdict{font-size:23px;font-weight:800;margin:16px 0 6px}
@@ -167,6 +170,20 @@
       <div class="pracbar"><span>Now: <b id="jamChord">—</b> <span class="muted" id="jamScaleLbl"></span></span><span class="pracscore" id="jamCoach">play over it…</span></div>
       <div id="jamBoard"></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="jamStop">Stop</button></div>
+    </div>
+  </div>
+
+  <div class="panel" id="chord">
+    <div class="libhead">Chord finder <span class="fbleg">strum a full chord, it names it</span></div>
+    <div id="chordIdle">
+      <div class="muted" style="font-size:14px;margin-bottom:12px">Strum and let a chord ring. Works best clean (an acoustic or a clean electric), not with heavy distortion. Polyphonic detection is the hard one, so treat it as a smart guess.</div>
+      <button class="btn" id="chordListen">Listen for a chord</button>
+    </div>
+    <div id="chordLive" class="hidden">
+      <div class="pracbar"><span id="chordStatus">Strum now…</span></div>
+      <div class="chordResult" id="chordResult"></div>
+      <div id="chordBoard"></div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="chordAgain">Listen again</button><button class="btn ghost" id="chordDone">Done</button></div>
     </div>
   </div>
 </div>
@@ -505,8 +522,8 @@ function jamChordLabel(bar){ return NOTE_NAMES[bar.r]+(bar.q==='maj'?'':bar.q===
 function jamScheduleBar(idx,t,spb){ const bar=jamState.jam.bars[idx%jamState.jam.bars.length], bassM=36+bar.r; jamTone(jamMidiF(bassM),t,spb*3.8,'triangle',0.17); jamTone(jamMidiF(bassM+7),t+2*spb,spb*1.6,'triangle',0.11); QUAL[bar.q].slice(0,3).forEach(iv=>jamTone(jamMidiF(60+((bar.r+iv)%12)),t+0.02,spb*3.6,'triangle',0.035)); for(let b=0;b<4;b++) jamClick(t+b*spb,b===0); }
 function jamScheduler(){ if(!jamState||!jamCtx) return; const spb=60/jamState.jam.bpm, spBar=spb*4; while(jamState.nextBarTime<jamCtx.currentTime+0.25){ const idx=jamState.bar; jamScheduleBar(idx,jamState.nextBarTime,spb); const delay=Math.max(0,(jamState.nextBarTime-jamCtx.currentTime)*1000); setTimeout(()=>jamShowChord(idx%jamState.jam.bars.length),delay); jamState.nextBarTime+=spBar; jamState.bar++; } }
 function jamShowChord(bi){ if(!jamState) return; const bar=jamState.jam.bars[bi], tones=new Set(QUAL[bar.q].map(iv=>(bar.r+iv)%12)); jamState.curTones=tones; const el=document.getElementById('jamChord'); if(el) el.textContent=jamChordLabel(bar); renderJamBoard(jamState.scaleSet,tones); }
-function renderJamBoard(scaleSet,curTones){
-  const host=document.getElementById('jamBoard'); if(!host) return;
+function renderJamBoard(scaleSet,curTones,hostId){
+  const host=document.getElementById(hostId||'jamBoard'); if(!host) return;
   const open=TUNINGS[tuningKey].open;
   const NF=15,padL=54,padT=10,fw=40,sh=30,padR=14,padB=24,W=padL+NF*fw+padR,H=padT+6*sh+padB,rows=[5,4,3,2,1,0],FF='font-family="-apple-system,sans-serif"';
   let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
@@ -532,6 +549,20 @@ function stopJam(){ if(jamTimer){ clearInterval(jamTimer); jamTimer=null; } stop
 (function(){ const sel=document.getElementById('jamPick'); if(sel) Object.entries(JAMS).forEach(([k,v])=>{ const o=document.createElement('option'); o.value=k; o.textContent=v.name; sel.appendChild(o); }); })();
 document.getElementById('jamStart').onclick=()=>startJam(document.getElementById('jamPick').value);
 document.getElementById('jamStop').onclick=stopJam;
+
+// ---- polyphonic chord recognition (chroma-based, best-effort) ----
+const CQUAL={maj:[0,4,7],min:[0,3,7],dom7:[0,4,7,10],min7:[0,3,7,10],maj7:[0,4,7,11],dim:[0,3,6],sus4:[0,5,7]};
+const CLABEL={maj:'major',min:'minor',dom7:'7',min7:'m7',maj7:'maj7',dim:'dim',sus4:'sus4'};
+let chordCtx=null,chordStream=null,chordAn=null,chordRAF=null;
+function frameChroma(an){ const N=an.frequencyBinCount, data=new Float32Array(N); an.getFloatFrequencyData(data); const sr=chordCtx.sampleRate, fft=an.fftSize, chroma=new Array(12).fill(0); let energy=0; for(let i=1;i<N;i++){ const f=i*sr/fft; if(f<70||f>1600) continue; const db=data[i]; if(db<-75) continue; const mag=Math.pow(10,db/20); energy+=mag; const pc=((Math.round(12*Math.log2(f/16.3516))%12)+12)%12; chroma[pc]+=mag; } return {chroma,energy}; }
+function matchChord(chroma){ const mx=Math.max(...chroma)||1, c=chroma.map(v=>v/mx); let best=null; for(const q in CQUAL){ const ivs=CQUAL[q]; for(let root=0;root<12;root++){ const set=ivs.map(iv=>(root+iv)%12); let inS=0, missing=0; set.forEach((pc,k)=>{ const v=c[pc]; if(v>=0.25){ inS+=v*(k===0?1.3:k===1?1.15:1.0); } else { missing++; } }); let outS=0; for(let pc=0;pc<12;pc++) if(set.indexOf(pc)<0) outS+=c[pc]; const score=inS-0.6*outS-missing*0.8; if(!best||score>best.score) best={root,q,score,tones:set}; } } return best; }
+function captureChord(){ const st=document.getElementById('chordStatus'); if(st) st.textContent='Strum now…'; const acc=new Array(12).fill(0); let frames=0; const t0=performance.now(); const loop=()=>{ const fc=frameChroma(chordAn); if(fc.energy>0.0006){ for(let i=0;i<12;i++) acc[i]+=fc.chroma[i]; frames++; } if(performance.now()-t0<1700){ chordRAF=requestAnimationFrame(loop); } else { finishChord(acc,frames); } }; chordRAF=requestAnimationFrame(loop); }
+function finishChord(acc,frames){ const st=document.getElementById('chordStatus'); if(frames<4){ if(st) st.textContent='Didn’t catch a chord — hit Listen again and let it ring.'; document.getElementById('chordResult').innerHTML=''; document.getElementById('chordBoard').innerHTML=''; return; } const chroma=acc.map(v=>v/frames), best=matchChord(chroma); if(st) st.textContent='Detected chord'; document.getElementById('chordResult').innerHTML=`<span class="cname">${NOTE_NAMES[best.root]} <span class="accent">${CLABEL[best.q]}</span></span>`; renderJamBoard(new Set(best.tones), new Set(best.tones), 'chordBoard'); }
+async function chordStart(){ try{ chordCtx=new (window.AudioContext||window.webkitAudioContext)(); await chordCtx.resume(); const id=document.getElementById('inDevice').value; const audio=Object.assign({echoCancellation:false,noiseSuppression:false,autoGainControl:false},id?{deviceId:{exact:id}}:{}); chordStream=await navigator.mediaDevices.getUserMedia({audio}); const src=chordCtx.createMediaStreamSource(chordStream); chordAn=chordCtx.createAnalyser(); chordAn.fftSize=8192; chordAn.smoothingTimeConstant=0.4; src.connect(chordAn); document.getElementById('chordIdle').classList.add('hidden'); document.getElementById('chordLive').classList.remove('hidden'); captureChord(); }catch(e){ document.getElementById('chordIdle').classList.remove('hidden'); document.getElementById('chordLive').classList.add('hidden'); } }
+function chordStop(){ if(chordRAF) cancelAnimationFrame(chordRAF); chordRAF=null; if(chordStream){ chordStream.getTracks().forEach(t=>t.stop()); chordStream=null; } if(chordCtx){ try{chordCtx.close();}catch(e){} chordCtx=null; } document.getElementById('chordLive').classList.add('hidden'); document.getElementById('chordIdle').classList.remove('hidden'); }
+document.getElementById('chordListen').onclick=chordStart;
+document.getElementById('chordAgain').onclick=captureChord;
+document.getElementById('chordDone').onclick=chordStop;
 
 // ---- wiring ----
 document.getElementById('listen').onclick=startSession;
