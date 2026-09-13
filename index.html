@@ -6,107 +6,121 @@
 <title>Riff Lab</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vexflow/4.2.2/vexflow-min.js"></script>
 <style>
-  :root{ --bg:#0e1116; --panel:#171b22; --line:#262c36; --ink:#e8edf5; --muted:#8b95a5; --accent:#5fd08a; --accent2:#6db6ff; }
+  :root{ --bg:#0f1216; --panel:#171b21; --panel2:#141821; --line:#232830; --ink:#e8ebef; --muted:#828b98; --accent:#ff5a1f; --paper:#ffffff; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 90px}
-  h1{font-size:22px;margin:0 0 2px} .sub{color:var(--muted);margin:0 0 22px;font-size:14px}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin:0 0 16px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  button{font:600 15px/1 inherit;color:#0e1116;background:var(--accent);border:0;border-radius:10px;padding:12px 18px;cursor:pointer}
-  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-  button.blue{background:var(--accent2)}
+  .wrap{max-width:680px;margin:0 auto;padding:28px 20px 90px}
+  button{font:inherit;cursor:pointer;border:0;background:none}
   button:disabled{opacity:.4;cursor:default}
-  select,input[type=number]{background:#11151b;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
-  label{color:var(--muted);font-size:13px}
-  .srcrow{margin-bottom:14px;gap:8px}
-  .midi{font-size:12px;color:var(--muted);margin-top:8px}
-  .midi.on{color:var(--accent)}
-  .tuner{display:flex;align-items:baseline;gap:14px;margin:6px 0 2px}
-  .note{font-size:60px;font-weight:800;letter-spacing:-1px;min-width:120px}
-  .hz{color:var(--muted);font-size:14px}
-  .meter{height:10px;background:#11151b;border:1px solid var(--line);border-radius:6px;position:relative;margin-top:10px;overflow:hidden}
-  .needle{position:absolute;top:0;bottom:0;width:3px;background:var(--accent);left:50%;transition:left .05s linear}
-  .cents{color:var(--muted);font-size:13px;margin-top:6px}
-  .status{color:var(--muted);font-size:13px;margin-left:auto}
-  .played{font-size:20px;font-weight:700;letter-spacing:.5px;min-height:28px}
-  .tab{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:var(--muted);white-space:pre;overflow-x:auto;margin-top:8px}
-  #staff{margin-top:12px;background:#f7f8fa;border-radius:10px;min-height:60px;overflow-x:auto}
-  #staff svg{display:block}
-  .verdict{font-size:26px;font-weight:800;margin:2px 0 8px}
-  .verdict .accent{color:var(--accent)}
-  .theory{font-size:17px;line-height:1.55}
+  .btn{background:var(--accent);color:#fff;font-weight:700;font-size:14px;border-radius:10px;padding:11px 18px}
+  .btn.ghost{background:transparent;color:#cbd2db;border:1px solid #2c323b;font-weight:600}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .muted{color:var(--muted)} .hidden{display:none}
-  .demos{margin-top:14px}
-  .demos .muted{font-size:13px;margin-bottom:8px}
-  .pill{background:transparent;color:var(--accent2);border:1px solid var(--line);font-weight:600;font-size:13px;padding:8px 12px;border-radius:20px}
-  .listening{box-shadow:0 0 0 2px var(--accent) inset}
+
+  .head{display:flex;align-items:center;justify-content:space-between}
+  .wm{font-size:21px;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+  .wm b{color:var(--accent)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+  .tag{font-size:12px;color:var(--muted);margin:3px 0 20px}
+
+  .hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px}
+  .hero.listening{box-shadow:0 0 0 2px var(--accent) inset}
+  .hnote{font-size:72px;font-weight:800;letter-spacing:-.03em;line-height:.9;font-variant-numeric:tabular-nums;min-height:66px}
+  .meter{height:7px;background:#0c0f12;border:1px solid var(--line);border-radius:5px;position:relative;margin:16px 0 0}
+  .needle{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--accent);left:50%;border-radius:2px;transition:left .05s linear}
+  .hmeta{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+  .hlab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#7a8290}
+  .hbtns{display:flex;gap:8px}
+  .statusline{font-size:11px;color:#5f6773;margin-top:12px}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 0}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
+  .chip select,.chip input{background:transparent;border:0;color:var(--ink);font:600 12px inherit;padding:2px}
+  .chip input{width:44px}
+  .chip select{outline:none;max-width:170px}
+  .hint{font-size:12px;color:var(--muted);margin:10px 2px 0;line-height:1.5}
+
+  .segwrap{display:flex;gap:6px;margin-top:24px}
+  .seg{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:9px;padding:7px 14px;font:600 13px inherit;cursor:pointer}
+  .seg.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .rlabel{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 4px}
+  .played{font-size:18px;font-weight:700;letter-spacing:.05em;min-height:26px}
+  #tab{display:none}
+  #staff{margin-top:10px;background:var(--paper);border-radius:12px;padding:4px;min-height:60px;overflow-x:auto}
+  #staff svg{display:block;margin:0 auto}
+
+  #result{margin-top:6px}
+  .verdict{font-size:23px;font-weight:800;margin:16px 0 6px}
+  .verdict .accent{color:var(--accent)}
+  .theory{font-size:15px;line-height:1.6;color:#aeb6c2;max-width:60ch}
+
+  .demos{margin-top:20px}
+  .dhint{font-size:13px;color:var(--muted);margin-bottom:8px}
+  .pill{background:transparent;color:var(--accent);border:1px solid #2c323b;font-weight:600;font-size:13px;padding:8px 12px;border-radius:20px;cursor:pointer}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin:22px 0 0}
+  .libhead{font-weight:700;margin-bottom:12px}
   .idea{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
-  .ititle{background:#11151b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:600 15px inherit;color:var(--ink);width:100%;max-width:340px}
-  .isub{font-size:12px;margin-top:6px}
-  .seg{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font:600 13px inherit;cursor:pointer}
-  .seg.active{background:var(--accent);color:#0e1116;border-color:var(--accent)}
+  .ititle{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:600 15px inherit;color:var(--ink);width:100%;max-width:340px}
+  .isub{font-size:12px;margin-top:6px;color:var(--muted)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Riff Lab <span class="muted" style="font-size:13px;font-weight:400">· the verb, ugly</span></h1>
-  <p class="sub">Play a riff or scale. It hears you, writes the notes, tab, and rhythm, then teaches you one true thing.</p>
+  <div class="head"><div class="wm">Riff<b>Lab</b></div><div class="dot"></div></div>
+  <div class="tag">hear it. read it. keep it.</div>
 
-  <div class="panel" id="live">
-    <div class="row srcrow">
-      <label>Input</label>
-      <select id="inDevice"><option value="">Default input (computer mic)</option></select>
-      <label>Tempo</label>
-      <input type="number" id="bpm" value="100" min="40" max="240" style="width:74px"/>
-      <label>Tuning</label>
-      <select id="tuning"></select>
-      <span class="status" id="status">idle</span>
-    </div>
-    <div class="midi" style="margin:-6px 0 12px">Tip: “Default input” is your computer mic — fine for an acoustic with no gear. For electric, pick your interface (e.g. Apollo Twin X) for a clean signal.</div>
-    <div class="row">
-      <button id="listen">Listen</button>
-      <button id="stop" class="blue" disabled>Stop &amp; Read</button>
-      <button id="clear" class="ghost">Clear</button>
-    </div>
-    <div class="tuner">
-      <div class="note" id="liveNote">–</div>
-      <div class="hz" id="liveHz">waiting for a note…</div>
-    </div>
+  <div class="hero" id="live">
+    <div class="hnote" id="liveNote">–</div>
     <div class="meter"><div class="needle" id="needle"></div></div>
-    <div class="cents" id="cents">tuner: in tune ± cents</div>
-    <div class="midi" id="midiStatus">MIDI: checking…</div>
-  </div>
-
-  <div class="panel">
-    <div class="muted" style="font-size:13px;margin-bottom:4px">You played</div>
-    <div class="played" id="played">—</div>
-    <div class="tab" id="tab"></div>
-    <div class="row" id="viewToggle" style="gap:6px;margin:12px 0 0">
-      <button class="seg" data-view="tab">Tab</button>
-      <button class="seg" data-view="notation">Notation</button>
-      <button class="seg" data-view="both">Both</button>
-    </div>
-    <div id="staff"></div>
-    <div class="demos">
-      <div class="muted">No rig handy? Try a sample (with rhythm):</div>
-      <div class="row">
-        <button class="pill" data-demo="gmajpent">G major pentatonic</button>
-        <button class="pill" data-demo="aminpent">A minor pentatonic</button>
-        <button class="pill" data-demo="riff">A little riff</button>
-        <button class="pill" data-demo="emajchord">E major (arpeggio)</button>
+    <div class="hmeta">
+      <div class="hlab"><span id="cents">tuner</span> <span id="liveHz">waiting for a note…</span></div>
+      <div class="hbtns">
+        <button id="listen" class="btn">Listen</button>
+        <button id="stop" class="btn" disabled>Stop &amp; read</button>
+        <button id="clear" class="btn ghost">Clear</button>
       </div>
     </div>
+    <div class="statusline"><span id="status">idle</span> · <span id="midiStatus">MIDI: checking…</span></div>
   </div>
 
-  <div class="panel hidden" id="result">
+  <div class="chips">
+    <label class="chip">Input <select id="inDevice"><option value="">Default input (mic)</option></select></label>
+    <label class="chip">Tempo <input type="number" id="bpm" value="100" min="40" max="240"/></label>
+    <label class="chip">Tuning <select id="tuning"></select></label>
+  </div>
+  <div class="hint">Tip: “Default input” is your computer mic, fine for an acoustic. Pick your interface (e.g. Apollo Twin X) for electric.</div>
+
+  <div class="segwrap" id="viewToggle">
+    <button class="seg" data-view="tab">Tab</button>
+    <button class="seg" data-view="notation">Notation</button>
+    <button class="seg" data-view="both">Both</button>
+  </div>
+
+  <div class="rlabel">You played</div>
+  <div class="played" id="played">—</div>
+  <div class="tab" id="tab"></div>
+  <div id="staff"></div>
+
+  <div class="hidden" id="result">
     <div class="verdict" id="verdict"></div>
     <div class="theory" id="theory"></div>
-    <div class="row" style="margin-top:14px"><button id="saveIdea" class="ghost" disabled>★ Save this idea</button></div>
+    <div style="margin-top:16px"><button id="saveIdea" class="btn ghost" disabled>★ Save this idea</button></div>
+  </div>
+
+  <div class="demos">
+    <div class="dhint">No rig handy? Try a sample (with rhythm):</div>
+    <div class="row">
+      <button class="pill" data-demo="gmajpent">G major pentatonic</button>
+      <button class="pill" data-demo="aminpent">A minor pentatonic</button>
+      <button class="pill" data-demo="riff">A little riff</button>
+      <button class="pill" data-demo="emajchord">E major (arpeggio)</button>
+    </div>
   </div>
 
   <div class="panel" id="library">
-    <div style="font-weight:700;margin-bottom:12px">Saved ideas</div>
+    <div class="libhead">Saved ideas</div>
     <div id="ideaList"></div>
   </div>
 </div>
