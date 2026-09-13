@@ -49,6 +49,11 @@
   #tab{display:none}
   #staff{margin-top:10px;background:var(--paper);border-radius:12px;padding:4px;min-height:60px;overflow-x:auto}
   #staff svg{display:block;margin:0 auto}
+  .fbwrap{margin-top:18px}
+  .fblabel{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .fbleg{text-transform:none;letter-spacing:0;color:#5f6773;margin-left:6px;font-weight:400}
+  #fretboard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
+  #fretboard svg{display:block}
 
   #result{margin-top:6px}
   .verdict{font-size:23px;font-weight:800;margin:16px 0 6px}
@@ -106,6 +111,7 @@
   <div class="hidden" id="result">
     <div class="verdict" id="verdict"></div>
     <div class="theory" id="theory"></div>
+    <div class="fbwrap"><div class="fblabel">On the fretboard <span class="fbleg">orange = root, white ring = where you played</span></div><div id="fretboard"></div></div>
     <div style="margin-top:16px"><button id="saveIdea" class="btn ghost" disabled>★ Save this idea</button></div>
   </div>
 
@@ -161,6 +167,7 @@ function tabSequence(midis){
 
 const SCALES=[['minor pentatonic',[0,3,5,7,10]],['major pentatonic',[0,2,4,7,9]],['blues',[0,3,5,6,7,10]],['natural minor',[0,2,3,5,7,8,10]],['major scale',[0,2,4,5,7,9,11]]];
 const CHORDS=[['major chord',[0,4,7]],['minor chord',[0,3,7]]];
+const SCALE_TEMPLATES=Object.fromEntries(SCALES.concat(CHORDS));
 const THEORY={
   'major pentatonic':r=>`That's the ${r} major pentatonic — five notes that sound sweet and safe over a ${r} backdrop. It's the friendliest scale on the guitar, the one where it's hard to play a wrong note.`,
   'minor pentatonic':r=>`That's the ${r} minor pentatonic — the backbone of rock and blues soloing. Nearly every guitar solo you love lives inside these five notes.`,
@@ -245,6 +252,36 @@ function renderStaff(cap){
 }
 function getVF(){ if(window.Vex&&window.Vex.Flow) return window.Vex.Flow; if(window.VexFlow) return window.VexFlow.Flow||window.VexFlow; return null; }
 
+// ---- fretboard visualizer ----
+function renderFretboard(cap, analysis){
+  const host=document.getElementById('fretboard'); if(!host) return;
+  if(!cap||!cap.length){ host.innerHTML=''; return; }
+  const open=TUNINGS[tuningKey].open;
+  const playedKey=new Set(tabSequence(cap.map(c=>c.midi)).map(p=>p.str+':'+p.fret));
+  let rootPc=-1, scaleSet=null;
+  if(analysis && !analysis.fallback && analysis.rootName){ rootPc=NOTE_NAMES.indexOf(analysis.rootName); const t=SCALE_TEMPLATES[analysis.name]; if(t) scaleSet=new Set(t.map(x=>(x+rootPc)%12)); }
+  const NF=15, padL=54, padT=10, fw=40, sh=30, padR=14, padB=24;
+  const W=padL+NF*fw+padR, H=padT+6*sh+padB, rows=[5,4,3,2,1,0], FF='font-family="-apple-system,sans-serif"';
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
+  [3,5,7,9,15].forEach(f=>{ s+=`<circle cx="${padL+(f-0.5)*fw}" cy="${padT+3*sh}" r="5" fill="#20262f"/>`; });
+  s+=`<circle cx="${padL+11.5*fw}" cy="${padT+2*sh}" r="5" fill="#20262f"/><circle cx="${padL+11.5*fw}" cy="${padT+4*sh}" r="5" fill="#20262f"/>`;
+  for(let f=0;f<=NF;f++){ const x=padL+f*fw, nut=f===0; s+=`<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT+6*sh}" stroke="${nut?'#c9cfd8':'#2a313b'}" stroke-width="${nut?4:1.5}"/>`; }
+  rows.forEach((si,ri)=>{ const y=padT+ri*sh+sh/2; s+=`<line x1="${padL}" y1="${y}" x2="${padL+NF*fw}" y2="${y}" stroke="#39404c" stroke-width="${(1+(5-si)*0.35).toFixed(2)}"/><text x="16" y="${y+4}" fill="#7a8290" font-size="12" font-weight="600" ${FF}>${NOTE_NAMES[open[si]%12]}</text>`; });
+  for(let f=1;f<=NF;f++){ s+=`<text x="${padL+(f-0.5)*fw}" y="${padT+6*sh+16}" fill="#5f6773" font-size="10" text-anchor="middle" ${FF}>${f}</text>`; }
+  rows.forEach((si,ri)=>{ const y=padT+ri*sh+sh/2, strNum=6-si;
+    for(let f=0;f<=NF;f++){ const pc=((open[si]+f)%12+12)%12, inScale=scaleSet?scaleSet.has(pc):false, isPlayed=playedKey.has(strNum+':'+f);
+      if(!inScale&&!isPlayed) continue;
+      const x=f===0?(padL-16):(padL+(f-0.5)*fw), isRoot=(pc===rootPc);
+      let fill='#242a33',stroke='#3a4150',txt='#9aa1ac';
+      if(isRoot){ fill='#ff5a1f'; stroke='#ff5a1f'; txt='#fff'; } else if(inScale){ fill='#2a313b'; stroke='#4a525e'; txt='#c4cad3'; }
+      s+=`<circle cx="${x}" cy="${y}" r="10" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/>`;
+      if(isPlayed) s+=`<circle cx="${x}" cy="${y}" r="12.5" fill="none" stroke="#ffffff" stroke-width="2"/>`;
+      s+=`<text x="${x}" y="${y+3.5}" fill="${txt}" font-size="10" font-weight="700" text-anchor="middle" ${FF}>${NOTE_NAMES[pc]}</text>`;
+    }
+  });
+  host.innerHTML=s+`</svg>`;
+}
+
 function showResult(cap){
   fillDurations(cap);
   renderPlayed(cap);
@@ -252,9 +289,10 @@ function showResult(cap){
   window.lastAnalysis=r;
   const res=document.getElementById('result'); res.classList.remove('hidden');
   document.getElementById('saveIdea').disabled = cap.length===0;
-  if(r.fallback){ document.getElementById('verdict').textContent=''; document.getElementById('theory').textContent=r.fallback; return; }
+  if(r.fallback){ document.getElementById('verdict').textContent=''; document.getElementById('theory').textContent=r.fallback; renderFretboard(cap,r); return; }
   document.getElementById('verdict').innerHTML=`That's <span class="accent">${r.rootName} ${r.name}</span>`;
   document.getElementById('theory').textContent=THEORY[r.name]?THEORY[r.name](r.rootName):'';
+  renderFretboard(cap,r);
 }
 
 // ---- audio capture ----
@@ -385,12 +423,12 @@ document.querySelectorAll('#viewToggle .seg').forEach(b=>{ b.onclick=()=>setView
 setView(staffView);
 
 // tuning selector
-(function(){ const sel=document.getElementById('tuning'); Object.entries(TUNINGS).forEach(([k,v])=>{ const o=document.createElement('option'); o.value=k; o.textContent=v.label; sel.appendChild(o); }); sel.value=tuningKey; sel.onchange=()=>{ tuningKey=sel.value; try{localStorage.setItem('rifflab_tuning',tuningKey);}catch(e){} if(lastCap.length) renderPlayed(lastCap); }; })();
+(function(){ const sel=document.getElementById('tuning'); Object.entries(TUNINGS).forEach(([k,v])=>{ const o=document.createElement('option'); o.value=k; o.textContent=v.label; sel.appendChild(o); }); sel.value=tuningKey; sel.onchange=()=>{ tuningKey=sel.value; try{localStorage.setItem('rifflab_tuning',tuningKey);}catch(e){} if(lastCap.length){ renderPlayed(lastCap); renderFretboard(lastCap, window.lastAnalysis); } }; })();
 
 // ---- wiring ----
 document.getElementById('listen').onclick=startSession;
 document.getElementById('stop').onclick=()=>stopSession(true);
-document.getElementById('clear').onclick=()=>{ captured=[]; document.getElementById('played').textContent='—'; document.getElementById('tab').textContent=''; document.getElementById('staff').innerHTML=''; document.getElementById('result').classList.add('hidden'); };
+document.getElementById('clear').onclick=()=>{ captured=[]; document.getElementById('played').textContent='—'; document.getElementById('tab').textContent=''; document.getElementById('staff').innerHTML=''; const fb=document.getElementById('fretboard'); if(fb) fb.innerHTML=''; document.getElementById('result').classList.add('hidden'); };
 document.getElementById('bpm').onchange=()=>{ if(lastCap.length) renderStaff(lastCap); };
 refreshDevices(); initMIDI(); renderLibrary();
 </script>
