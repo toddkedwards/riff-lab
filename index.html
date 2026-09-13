@@ -89,6 +89,10 @@
   .idea{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
   .ititle{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:600 15px inherit;color:var(--ink);width:100%;max-width:340px}
   .isub{font-size:12px;margin-top:6px;color:var(--muted)}
+  .keyin{background:#0f1216;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;color:var(--ink)}
+  .keyin:focus{outline:none;border-color:var(--accent)}
+  .tchips{display:flex;gap:6px;flex-wrap:wrap}
+  .tout{margin-top:16px;font-size:15px;line-height:1.65;white-space:pre-wrap;min-height:6px}
 </style>
 </head>
 <body>
@@ -208,7 +212,24 @@
   </section>
 
   <section class="view hidden" data-tab="tutor">
-    <div class="panel"><div class="libhead">Tutor</div><div class="muted" style="font-size:14px;line-height:1.6">Ask why what you just played works, in plain language. Wiring it up next.</div></div>
+    <div class="panel" id="tutor">
+      <div class="libhead">Tutor</div>
+      <div id="tutorNoKey">
+        <div class="muted" style="font-size:14px;line-height:1.6;margin-bottom:12px">The tutor uses Claude to explain the theory behind what you play. Paste your Anthropic API key, it's stored only in this browser and talks to Claude directly, never to us. Get one at console.anthropic.com.</div>
+        <div class="row"><input id="tutorKey" type="password" class="keyin" placeholder="sk-ant-..." style="flex:1;min-width:200px"/><button class="btn" id="tutorSaveKey">Save key</button></div>
+      </div>
+      <div id="tutorMain" class="hidden">
+        <div class="muted" id="tutorCtx" style="font-size:13px;margin-bottom:12px"></div>
+        <div class="tchips" id="tutorChips">
+          <button class="pill" data-q="Explain the theory behind what I just played, and why it works.">Why does this work?</button>
+          <button class="pill" data-q="Based on what I just played, what should I practice next?">What should I practice?</button>
+          <button class="pill" data-q="How do I use what I just played to solo or write music?">How do I use this?</button>
+        </div>
+        <div class="row" style="margin-top:10px"><input id="tutorInput" type="text" class="keyin" placeholder="Ask the tutor anything about your playing…" style="flex:1;min-width:200px"/><button class="btn" id="tutorAsk">Ask</button></div>
+        <div id="tutorOut" class="tout"></div>
+        <div style="margin-top:14px"><button class="btn ghost" id="tutorClearKey">Change key</button></div>
+      </div>
+    </div>
   </section>
 
   <section class="view hidden" data-tab="ideas">
@@ -588,12 +609,43 @@ let chordCtx=null,chordStream=null,chordAn=null,chordRAF=null;
 function frameChroma(an){ const N=an.frequencyBinCount, data=new Float32Array(N); an.getFloatFrequencyData(data); const sr=chordCtx.sampleRate, fft=an.fftSize, chroma=new Array(12).fill(0); let energy=0; for(let i=1;i<N;i++){ const f=i*sr/fft; if(f<70||f>1600) continue; const db=data[i]; if(db<-75) continue; const mag=Math.pow(10,db/20); energy+=mag; const pc=((Math.round(12*Math.log2(f/16.3516))%12)+12)%12; chroma[pc]+=mag; } return {chroma,energy}; }
 function matchChord(chroma){ const mx=Math.max(...chroma)||1, c=chroma.map(v=>v/mx); let best=null; for(const q in CQUAL){ const ivs=CQUAL[q]; for(let root=0;root<12;root++){ const set=ivs.map(iv=>(root+iv)%12); let inS=0, missing=0; set.forEach((pc,k)=>{ const v=c[pc]; if(v>=0.25){ inS+=v*(k===0?1.3:k===1?1.15:1.0); } else { missing++; } }); let outS=0; for(let pc=0;pc<12;pc++) if(set.indexOf(pc)<0) outS+=c[pc]; const score=inS-0.6*outS-missing*0.8; if(!best||score>best.score) best={root,q,score,tones:set}; } } return best; }
 function captureChord(){ const st=document.getElementById('chordStatus'); if(st) st.textContent='Strum now…'; const acc=new Array(12).fill(0); let frames=0; const t0=performance.now(); const loop=()=>{ const fc=frameChroma(chordAn); if(fc.energy>0.0006){ for(let i=0;i<12;i++) acc[i]+=fc.chroma[i]; frames++; } if(performance.now()-t0<1700){ chordRAF=requestAnimationFrame(loop); } else { finishChord(acc,frames); } }; chordRAF=requestAnimationFrame(loop); }
-function finishChord(acc,frames){ const st=document.getElementById('chordStatus'); if(frames<4){ if(st) st.textContent='Didn’t catch a chord — hit Listen again and let it ring.'; document.getElementById('chordResult').innerHTML=''; document.getElementById('chordBoard').innerHTML=''; return; } const chroma=acc.map(v=>v/frames), best=matchChord(chroma); if(st) st.textContent='Detected chord'; document.getElementById('chordResult').innerHTML=`<span class="cname">${NOTE_NAMES[best.root]} <span class="accent">${CLABEL[best.q]}</span></span>`; renderJamBoard(new Set(best.tones), new Set(best.tones), 'chordBoard'); }
+function finishChord(acc,frames){ const st=document.getElementById('chordStatus'); if(frames<4){ if(st) st.textContent='Didn’t catch a chord — hit Listen again and let it ring.'; document.getElementById('chordResult').innerHTML=''; document.getElementById('chordBoard').innerHTML=''; return; } const chroma=acc.map(v=>v/frames), best=matchChord(chroma); if(st) st.textContent='Detected chord'; document.getElementById('chordResult').innerHTML=`<span class="cname">${NOTE_NAMES[best.root]} <span class="accent">${CLABEL[best.q]}</span></span>`; window.lastChord=NOTE_NAMES[best.root]+' '+CLABEL[best.q]; renderJamBoard(new Set(best.tones), new Set(best.tones), 'chordBoard'); }
 async function chordStart(){ try{ chordCtx=new (window.AudioContext||window.webkitAudioContext)(); await chordCtx.resume(); const id=document.getElementById('inDevice').value; const audio=Object.assign({echoCancellation:false,noiseSuppression:false,autoGainControl:false},id?{deviceId:{exact:id}}:{}); chordStream=await navigator.mediaDevices.getUserMedia({audio}); const src=chordCtx.createMediaStreamSource(chordStream); chordAn=chordCtx.createAnalyser(); chordAn.fftSize=8192; chordAn.smoothingTimeConstant=0.4; src.connect(chordAn); document.getElementById('chordIdle').classList.add('hidden'); document.getElementById('chordLive').classList.remove('hidden'); captureChord(); }catch(e){ document.getElementById('chordIdle').classList.remove('hidden'); document.getElementById('chordLive').classList.add('hidden'); } }
 function chordStop(){ if(chordRAF) cancelAnimationFrame(chordRAF); chordRAF=null; if(chordStream){ chordStream.getTracks().forEach(t=>t.stop()); chordStream=null; } if(chordCtx){ try{chordCtx.close();}catch(e){} chordCtx=null; } document.getElementById('chordLive').classList.add('hidden'); document.getElementById('chordIdle').classList.remove('hidden'); }
 document.getElementById('chordListen').onclick=chordStart;
 document.getElementById('chordAgain').onclick=captureChord;
 document.getElementById('chordDone').onclick=chordStop;
+
+// ---- AI tutor (BYOK Anthropic, grounded by the analyzer) ----
+const TKEY='rifflab_anthropic_key';
+function tutorFacts(){
+  const p=[];
+  if(lastCap&&lastCap.length){ p.push('The student just played these notes, left to right: '+lastCap.map(c=>midiName(c.midi)).join(' ')+'.'); const a=window.lastAnalysis; if(a&&!a.fallback) p.push('The audio analyzer detected that as '+a.rootName+' '+a.name+'.'); }
+  if(window.lastChord) p.push('The student strummed a chord the analyzer detected as '+window.lastChord+'.');
+  p.push('Guitar tuning: '+(TUNINGS[tuningKey]?TUNINGS[tuningKey].label:'standard')+'.');
+  if(!(lastCap&&lastCap.length) && !window.lastChord) p.push('The student has not played anything yet this session.');
+  return p.join(' ');
+}
+function tutorShowKey(){ document.getElementById('tutorNoKey').classList.remove('hidden'); document.getElementById('tutorMain').classList.add('hidden'); }
+function tutorRefresh(){ const has=!!localStorage.getItem(TKEY); const nk=document.getElementById('tutorNoKey'), mn=document.getElementById('tutorMain'); if(!nk||!mn) return; nk.classList.toggle('hidden',has); mn.classList.toggle('hidden',!has); if(has){ const a=window.lastAnalysis; let ctx; if(lastCap&&lastCap.length&&a&&!a.fallback) ctx='I can see your last riff: '+a.rootName+' '+a.name+'. Ask away.'; else if(window.lastChord) ctx='I can see your last chord: '+window.lastChord+'. Ask away.'; else ctx='Play a riff or find a chord first for context, or just ask any guitar question.'; document.getElementById('tutorCtx').textContent=ctx; } }
+async function tutorAsk(q){
+  const key=localStorage.getItem(TKEY); if(!key){ tutorShowKey(); return; }
+  const out=document.getElementById('tutorOut'); out.classList.add('muted'); out.textContent='Thinking…';
+  const sys="You are a warm, encouraging guitar teacher talking to a self-taught player who can play but is still learning to read and understand music. The facts below come from an on-device audio analyzer and are GROUND TRUTH: treat the detected notes, key/scale, and chord as correct, never contradict them or re-derive the pitches yourself. Explain the theory and the WHY in plain, friendly language a beginner understands. Be concise (2 to 4 short paragraphs), skip lists unless truly helpful, and encourage them.\n\nWhat the student played:\n"+tutorFacts();
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-5',max_tokens:700,system:sys,messages:[{role:'user',content:q}]})});
+    const data=await r.json();
+    if(!r.ok){ out.classList.remove('muted'); out.textContent='Error: '+((data&&data.error&&data.error.message)||('HTTP '+r.status))+(r.status===401?' — check your API key.':''); return; }
+    const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    out.classList.remove('muted'); out.textContent=text||'(no response)';
+  }catch(e){ out.classList.remove('muted'); out.textContent='Could not reach Claude: '+e.message+'. An ad-blocker or VPN can block api.anthropic.com.'; }
+}
+document.getElementById('tutorSaveKey').onclick=()=>{ const k=document.getElementById('tutorKey').value.trim(); if(k){ localStorage.setItem(TKEY,k); document.getElementById('tutorKey').value=''; tutorRefresh(); } };
+document.getElementById('tutorClearKey').onclick=()=>{ localStorage.removeItem(TKEY); tutorRefresh(); };
+document.getElementById('tutorAsk').onclick=()=>{ const q=document.getElementById('tutorInput').value.trim(); if(q) tutorAsk(q); };
+document.getElementById('tutorInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const q=e.target.value.trim(); if(q) tutorAsk(q); } });
+document.getElementById('tutorChips').addEventListener('click',e=>{ const q=e.target.getAttribute&&e.target.getAttribute('data-q'); if(q) tutorAsk(q); });
+tutorRefresh();
 
 // ---- tab navigation ----
 (function(){
@@ -604,6 +656,7 @@ document.getElementById('chordDone').onclick=chordStop;
     if(t!=='jam'&&typeof stopJam==='function') stopJam();
     if(t!=='chords'&&typeof chordStop==='function') chordStop();
     try{ if(t!=='play'&&typeof stopSession==='function'&&listening) stopSession(false); }catch(e){}
+    if(t==='tutor'&&typeof tutorRefresh==='function') tutorRefresh();
     window.scrollTo(0,0);
   }
   tabs.forEach(b=>b.onclick=()=>show(b.dataset.tab));
