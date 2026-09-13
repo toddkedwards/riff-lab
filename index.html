@@ -225,6 +225,9 @@ function renderStaff(cap){
     const fmt=new VF.Formatter(); voices.forEach(v=>fmt.joinVoices([v])); fmt.format(voices,width-100);
     if(nVoice) nVoice.draw(ctx,stave);
     if(tVoice) tVoice.draw(ctx,tabStave);
+    // auto-fit the card to the ACTUAL drawn content so nothing (esp. low tab numbers) is clipped
+    const svgEl=div.querySelector('svg');
+    if(svgEl){ try{ const bb=svgEl.getBBox(); const fh=Math.ceil(Math.max(60, bb.y+bb.height+18)); svgEl.setAttribute('height',fh); svgEl.style.height=fh+'px'; }catch(_){} }
   }catch(e){ console.warn('staff',e); div.innerHTML='<div class="muted" style="padding:10px">(staff unavailable — notes &amp; tab text above still work)</div>'; }
 }
 function getVF(){ if(window.Vex&&window.Vex.Flow) return window.Vex.Flow; if(window.VexFlow) return window.VexFlow.Flow||window.VexFlow; return null; }
