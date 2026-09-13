@@ -63,6 +63,9 @@
   .pchoice{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:600 13px inherit;cursor:pointer;min-width:42px}
   .pchoice:hover:not(:disabled){border-color:var(--accent)}
   .pchoice:disabled{opacity:.45;cursor:default}
+  #jamBoard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
+  #jamBoard svg{display:block}
+  #jam .pracbar b{color:var(--accent)}
 
   #result{margin-top:6px}
   .verdict{font-size:23px;font-weight:800;margin:16px 0 6px}
@@ -150,6 +153,20 @@
       <div id="pracBoard"></div>
       <div class="pracchoices" id="pracChoices"></div>
       <div class="row" style="margin-top:12px"><button class="btn" id="pracNext" disabled>Next</button><button class="btn ghost" id="pracStop">Stop</button></div>
+    </div>
+  </div>
+
+  <div class="panel" id="jam">
+    <div class="libhead">Jam + improv coaching</div>
+    <div id="jamIdle">
+      <div class="muted" style="font-size:14px;margin-bottom:12px">Pick a groove. It plays a backing track, shows the scale to solo over, and lights up the chord tones to target as the chords change. Best with headphones or an interface so the mic hears just your guitar.</div>
+      <div class="chip" style="margin-bottom:14px">Groove <select id="jamPick"></select></div>
+      <button class="btn" id="jamStart">Start jam</button>
+    </div>
+    <div id="jamLive" class="hidden">
+      <div class="pracbar"><span>Now: <b id="jamChord">—</b> <span class="muted" id="jamScaleLbl"></span></span><span class="pracscore" id="jamCoach">play over it…</span></div>
+      <div id="jamBoard"></div>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="jamStop">Stop</button></div>
     </div>
   </div>
 </div>
@@ -472,6 +489,49 @@ document.getElementById('pracStart').onclick=()=>{ document.getElementById('prac
 document.getElementById('pracStop').onclick=()=>{ document.getElementById('practiceLive').classList.add('hidden'); document.getElementById('practiceIdle').classList.remove('hidden'); };
 document.getElementById('pracNext').onclick=pracNew;
 document.getElementById('pracChoices').addEventListener('click',e=>{ const a=e.target.getAttribute&&e.target.getAttribute('data-pc'); if(a==null) return; pracAnswer(+a); });
+
+// ---- jam + improv coaching ----
+const QUAL={maj:[0,4,7],min:[0,3,7],dom7:[0,4,7,10],min7:[0,3,7,10]};
+const JAMS={
+  amblues:{name:'A minor blues',key:9,scaleName:'blues',bpm:92,bars:[{r:9,q:'dom7'},{r:9,q:'dom7'},{r:9,q:'dom7'},{r:9,q:'dom7'},{r:2,q:'dom7'},{r:2,q:'dom7'},{r:9,q:'dom7'},{r:9,q:'dom7'},{r:4,q:'dom7'},{r:2,q:'dom7'},{r:9,q:'dom7'},{r:4,q:'dom7'}]},
+  emjam:{name:'E minor groove',key:4,scaleName:'minor pentatonic',bpm:104,bars:[{r:4,q:'min'},{r:4,q:'min'},{r:0,q:'maj'},{r:2,q:'maj'}]},
+  ggroove:{name:'G major jam',key:7,scaleName:'major pentatonic',bpm:112,bars:[{r:7,q:'maj'},{r:0,q:'maj'},{r:9,q:'min'},{r:2,q:'maj'}]}
+};
+let jamCtx=null,jamTimer=null,jamState=null,jamStream=null,jamRAF=null,jamCand=null,jamHeld=0,jamCommitted=false,jamLastT=0,jamHits={notes:0,inkey:0};
+function jamMidiF(m){ return 440*Math.pow(2,(m-69)/12); }
+function jamTone(freq,t,dur,type,peak){ const o=jamCtx.createOscillator(),g=jamCtx.createGain(); o.type=type; o.frequency.value=freq; o.connect(g); g.connect(jamState.master); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(peak,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+dur); o.start(t); o.stop(t+dur+0.03); }
+function jamClick(t,accent){ const o=jamCtx.createOscillator(),g=jamCtx.createGain(); o.type='square'; o.frequency.value=accent?1900:1300; o.connect(g); g.connect(jamState.master); g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(accent?0.05:0.025,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+0.05); o.start(t); o.stop(t+0.07); }
+function jamChordLabel(bar){ return NOTE_NAMES[bar.r]+(bar.q==='maj'?'':bar.q==='min'?'m':bar.q==='dom7'?'7':'m7'); }
+function jamScheduleBar(idx,t,spb){ const bar=jamState.jam.bars[idx%jamState.jam.bars.length], bassM=36+bar.r; jamTone(jamMidiF(bassM),t,spb*3.8,'triangle',0.17); jamTone(jamMidiF(bassM+7),t+2*spb,spb*1.6,'triangle',0.11); QUAL[bar.q].slice(0,3).forEach(iv=>jamTone(jamMidiF(60+((bar.r+iv)%12)),t+0.02,spb*3.6,'triangle',0.035)); for(let b=0;b<4;b++) jamClick(t+b*spb,b===0); }
+function jamScheduler(){ if(!jamState||!jamCtx) return; const spb=60/jamState.jam.bpm, spBar=spb*4; while(jamState.nextBarTime<jamCtx.currentTime+0.25){ const idx=jamState.bar; jamScheduleBar(idx,jamState.nextBarTime,spb); const delay=Math.max(0,(jamState.nextBarTime-jamCtx.currentTime)*1000); setTimeout(()=>jamShowChord(idx%jamState.jam.bars.length),delay); jamState.nextBarTime+=spBar; jamState.bar++; } }
+function jamShowChord(bi){ if(!jamState) return; const bar=jamState.jam.bars[bi], tones=new Set(QUAL[bar.q].map(iv=>(bar.r+iv)%12)); jamState.curTones=tones; const el=document.getElementById('jamChord'); if(el) el.textContent=jamChordLabel(bar); renderJamBoard(jamState.scaleSet,tones); }
+function renderJamBoard(scaleSet,curTones){
+  const host=document.getElementById('jamBoard'); if(!host) return;
+  const open=TUNINGS[tuningKey].open;
+  const NF=15,padL=54,padT=10,fw=40,sh=30,padR=14,padB=24,W=padL+NF*fw+padR,H=padT+6*sh+padB,rows=[5,4,3,2,1,0],FF='font-family="-apple-system,sans-serif"';
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
+  [3,5,7,9,15].forEach(f=>{ s+=`<circle cx="${padL+(f-0.5)*fw}" cy="${padT+3*sh}" r="5" fill="#20262f"/>`; });
+  s+=`<circle cx="${padL+11.5*fw}" cy="${padT+2*sh}" r="5" fill="#20262f"/><circle cx="${padL+11.5*fw}" cy="${padT+4*sh}" r="5" fill="#20262f"/>`;
+  for(let f=0;f<=NF;f++){ const x=padL+f*fw,nut=f===0; s+=`<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT+6*sh}" stroke="${nut?'#c9cfd8':'#2a313b'}" stroke-width="${nut?4:1.5}"/>`; }
+  rows.forEach((sidx,ri)=>{ const y=padT+ri*sh+sh/2; s+=`<line x1="${padL}" y1="${y}" x2="${padL+NF*fw}" y2="${y}" stroke="#39404c" stroke-width="${(1+(5-sidx)*0.35).toFixed(2)}"/><text x="16" y="${y+4}" fill="#7a8290" font-size="12" font-weight="600" ${FF}>${NOTE_NAMES[open[sidx]%12]}</text>`; });
+  for(let f=1;f<=NF;f++){ s+=`<text x="${padL+(f-0.5)*fw}" y="${padT+6*sh+16}" fill="#5f6773" font-size="10" text-anchor="middle" ${FF}>${f}</text>`; }
+  rows.forEach((sidx,ri)=>{ const y=padT+ri*sh+sh/2;
+    for(let f=0;f<=NF;f++){ const pc=((open[sidx]+f)%12+12)%12; if(!scaleSet.has(pc)) continue;
+      const x=f===0?(padL-16):(padL+(f-0.5)*fw), isTone=curTones&&curTones.has(pc);
+      let fill='#242a33',stroke='#3a4150',txt='#8f96a1'; if(isTone){ fill='#ff5a1f'; stroke='#ff5a1f'; txt='#fff'; }
+      s+=`<circle cx="${x}" cy="${y}" r="10" fill="${fill}" stroke="${stroke}" stroke-width="1.2"/><text x="${x}" y="${y+3.5}" fill="${txt}" font-size="10" font-weight="700" text-anchor="middle" ${FF}>${NOTE_NAMES[pc]}</text>`;
+    }
+  });
+  host.innerHTML=s+`</svg>`;
+}
+function jamJudge(pc){ if(!jamState) return; jamHits.notes++; const tones=jamState.curTones||new Set(), scale=jamState.scaleSet; let msg,inkey=false; if(tones.has(pc)){ msg='chord tone, nice'; inkey=true; } else if(scale.has(pc)){ msg='in the scale'; inkey=true; } else { msg='outside, resolve it'; } if(inkey) jamHits.inkey++; const el=document.getElementById('jamCoach'); if(el) el.textContent=msg+' · in key '+Math.round(jamHits.inkey/jamHits.notes*100)+'%'; }
+async function startJamMic(){ try{ const id=document.getElementById('inDevice').value; const audio=Object.assign({echoCancellation:false,noiseSuppression:false,autoGainControl:false},id?{deviceId:{exact:id}}:{}); jamStream=await navigator.mediaDevices.getUserMedia({audio}); const src=jamCtx.createMediaStreamSource(jamStream); const an=jamCtx.createAnalyser(); an.fftSize=2048; const b=new Float32Array(an.fftSize); src.connect(an); jamLastT=performance.now(); jamCand=null; jamHeld=0; jamCommitted=false; jamHits={notes:0,inkey:0}; const loop=()=>{ jamRAF=requestAnimationFrame(loop); const now=performance.now(), dt=(now-jamLastT)/1000; jamLastT=now; an.getFloatTimeDomainData(b); const f=autoCorrelate(b,jamCtx.sampleRate); if(f===-1){ jamCand=null; jamHeld=0; jamCommitted=false; return; } const midi=freqToMidi(f); if(midi===jamCand){ jamHeld+=dt; } else { jamCand=midi; jamHeld=0; jamCommitted=false; } if(jamHeld>=0.08&&!jamCommitted){ jamCommitted=true; jamJudge(((midi%12)+12)%12); } }; loop(); }catch(e){ const el=document.getElementById('jamCoach'); if(el) el.textContent='mic off, visual coaching only'; } }
+function stopJamMic(){ if(jamRAF) cancelAnimationFrame(jamRAF); jamRAF=null; if(jamStream){ jamStream.getTracks().forEach(t=>t.stop()); jamStream=null; } }
+function startJam(key){ stopJam(); const jam=JAMS[key]; jamCtx=new (window.AudioContext||window.webkitAudioContext)(); const master=jamCtx.createGain(); master.gain.value=0.85; master.connect(jamCtx.destination); jamState={jam,bar:0,nextBarTime:jamCtx.currentTime+0.2,master,scaleSet:new Set(SCALE_TEMPLATES[jam.scaleName].map(x=>(x+jam.key)%12)),curTones:null}; document.getElementById('jamIdle').classList.add('hidden'); document.getElementById('jamLive').classList.remove('hidden'); document.getElementById('jamScaleLbl').textContent='· solo in '+NOTE_NAMES[jam.key]+' '+jam.scaleName; jamShowChord(0); jamTimer=setInterval(jamScheduler,25); startJamMic(); }
+function stopJam(){ if(jamTimer){ clearInterval(jamTimer); jamTimer=null; } stopJamMic(); if(jamCtx){ try{jamCtx.close();}catch(e){} jamCtx=null; } const l=document.getElementById('jamLive'),i=document.getElementById('jamIdle'); if(l) l.classList.add('hidden'); if(i) i.classList.remove('hidden'); jamState=null; }
+(function(){ const sel=document.getElementById('jamPick'); if(sel) Object.entries(JAMS).forEach(([k,v])=>{ const o=document.createElement('option'); o.value=k; o.textContent=v.name; sel.appendChild(o); }); })();
+document.getElementById('jamStart').onclick=()=>startJam(document.getElementById('jamPick').value);
+document.getElementById('jamStop').onclick=stopJam;
 
 // ---- wiring ----
 document.getElementById('listen').onclick=startSession;
