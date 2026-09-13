@@ -22,6 +22,11 @@
   .wm b{color:var(--accent)}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
   .tag{font-size:12px;color:var(--muted);margin:3px 0 20px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:4px 0 12px}
+  .gctrls{display:flex;gap:8px;flex-wrap:wrap}
+  .tabbar{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:0 0 22px;position:sticky;top:0;background:var(--bg);z-index:5}
+  .tabbtn{font:600 14px inherit;color:var(--muted);background:none;border:0;padding:12px 14px;border-bottom:2px solid transparent;white-space:nowrap;cursor:pointer}
+  .tabbtn.on{color:var(--ink);border-bottom-color:var(--accent)}
 
   .hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px}
   .hero.listening{box-shadow:0 0 0 2px var(--accent) inset}
@@ -88,9 +93,24 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="head"><div class="wm">Riff<b>Lab</b></div><div class="dot"></div></div>
-  <div class="tag">hear it. read it. keep it.</div>
+  <div class="topbar">
+    <div class="head"><div class="wm">Riff<b>Lab</b></div><div class="dot"></div></div>
+    <div class="gctrls">
+      <label class="chip">Input <select id="inDevice"><option value="">Default input (mic)</option></select></label>
+      <label class="chip">Tuning <select id="tuning"></select></label>
+    </div>
+  </div>
 
+  <nav class="tabbar" id="tabbar">
+    <button class="tabbtn on" data-tab="play">Play</button>
+    <button class="tabbtn" data-tab="fretboard">Fretboard</button>
+    <button class="tabbtn" data-tab="jam">Jam</button>
+    <button class="tabbtn" data-tab="chords">Chords</button>
+    <button class="tabbtn" data-tab="tutor">Tutor</button>
+    <button class="tabbtn" data-tab="ideas">Ideas</button>
+  </nav>
+
+  <section class="view" data-tab="play">
   <div class="hero" id="live">
     <div class="hnote" id="liveNote">–</div>
     <div class="meter"><div class="needle" id="needle"></div></div>
@@ -106,11 +126,9 @@
   </div>
 
   <div class="chips">
-    <label class="chip">Input <select id="inDevice"><option value="">Default input (mic)</option></select></label>
     <label class="chip">Tempo <input type="number" id="bpm" value="100" min="40" max="240"/></label>
-    <label class="chip">Tuning <select id="tuning"></select></label>
   </div>
-  <div class="hint">Tip: “Default input” is your computer mic, fine for an acoustic. Pick your interface (e.g. Apollo Twin X) for electric.</div>
+  <div class="hint">Tip: “Default input” (in the header) is your computer mic, fine for an acoustic. Pick your interface for electric.</div>
 
   <div class="segwrap" id="viewToggle">
     <button class="seg" data-view="tab">Tab</button>
@@ -139,12 +157,9 @@
       <button class="pill" data-demo="emajchord">E major (arpeggio)</button>
     </div>
   </div>
+  </section>
 
-  <div class="panel" id="library">
-    <div class="libhead">Saved ideas</div>
-    <div id="ideaList"></div>
-  </div>
-
+  <section class="view hidden" data-tab="fretboard">
   <div class="panel" id="practice">
     <div class="libhead">Fretboard practice</div>
     <div id="practiceIdle">
@@ -158,7 +173,9 @@
       <div class="row" style="margin-top:12px"><button class="btn" id="pracNext" disabled>Next</button><button class="btn ghost" id="pracStop">Stop</button></div>
     </div>
   </div>
+  </section>
 
+  <section class="view hidden" data-tab="jam">
   <div class="panel" id="jam">
     <div class="libhead">Jam + improv coaching</div>
     <div id="jamIdle">
@@ -172,7 +189,9 @@
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="jamStop">Stop</button></div>
     </div>
   </div>
+  </section>
 
+  <section class="view hidden" data-tab="chords">
   <div class="panel" id="chord">
     <div class="libhead">Chord finder <span class="fbleg">strum a full chord, it names it</span></div>
     <div id="chordIdle">
@@ -186,6 +205,18 @@
       <div class="row" style="margin-top:12px"><button class="btn" id="chordAgain">Listen again</button><button class="btn ghost" id="chordDone">Done</button></div>
     </div>
   </div>
+  </section>
+
+  <section class="view hidden" data-tab="tutor">
+    <div class="panel"><div class="libhead">Tutor</div><div class="muted" style="font-size:14px;line-height:1.6">Ask why what you just played works, in plain language. Wiring it up next.</div></div>
+  </section>
+
+  <section class="view hidden" data-tab="ideas">
+  <div class="panel" id="library">
+    <div class="libhead">Saved ideas</div>
+    <div id="ideaList"></div>
+  </div>
+  </section>
 </div>
 
 <script>
@@ -563,6 +594,20 @@ function chordStop(){ if(chordRAF) cancelAnimationFrame(chordRAF); chordRAF=null
 document.getElementById('chordListen').onclick=chordStart;
 document.getElementById('chordAgain').onclick=captureChord;
 document.getElementById('chordDone').onclick=chordStop;
+
+// ---- tab navigation ----
+(function(){
+  const tabs=[...document.querySelectorAll('#tabbar .tabbtn')], views=[...document.querySelectorAll('.view')];
+  function show(t){
+    tabs.forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+    views.forEach(v=>v.classList.toggle('hidden',v.dataset.tab!==t));
+    if(t!=='jam'&&typeof stopJam==='function') stopJam();
+    if(t!=='chords'&&typeof chordStop==='function') chordStop();
+    try{ if(t!=='play'&&typeof stopSession==='function'&&listening) stopSession(false); }catch(e){}
+    window.scrollTo(0,0);
+  }
+  tabs.forEach(b=>b.onclick=()=>show(b.dataset.tab));
+})();
 
 // ---- wiring ----
 document.getElementById('listen').onclick=startSession;
