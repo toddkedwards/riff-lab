@@ -54,6 +54,15 @@
   .fbleg{text-transform:none;letter-spacing:0;color:#5f6773;margin-left:6px;font-weight:400}
   #fretboard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
   #fretboard svg{display:block}
+  .pracbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
+  .pracbar>span:first-child{font-weight:600}
+  .pracscore{font-size:12px;color:var(--muted)}
+  #pracBoard{background:#12161c;border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto}
+  #pracBoard svg{display:block}
+  .pracchoices{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .pchoice{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:600 13px inherit;cursor:pointer;min-width:42px}
+  .pchoice:hover:not(:disabled){border-color:var(--accent)}
+  .pchoice:disabled{opacity:.45;cursor:default}
 
   #result{margin-top:6px}
   .verdict{font-size:23px;font-weight:800;margin:16px 0 6px}
@@ -128,6 +137,20 @@
   <div class="panel" id="library">
     <div class="libhead">Saved ideas</div>
     <div id="ideaList"></div>
+  </div>
+
+  <div class="panel" id="practice">
+    <div class="libhead">Fretboard practice</div>
+    <div id="practiceIdle">
+      <div class="muted" style="font-size:14px;margin-bottom:12px">Learn the neck. We mark a spot, you name the note. Uses your current tuning.</div>
+      <button class="btn" id="pracStart">Start practice</button>
+    </div>
+    <div id="practiceLive" class="hidden">
+      <div class="pracbar"><span id="pracQ">What note is the marked position?</span><span class="pracscore" id="pracScore">Correct 0 · streak 0</span></div>
+      <div id="pracBoard"></div>
+      <div class="pracchoices" id="pracChoices"></div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="pracNext" disabled>Next</button><button class="btn ghost" id="pracStop">Stop</button></div>
+    </div>
   </div>
 </div>
 
@@ -424,6 +447,31 @@ setView(staffView);
 
 // tuning selector
 (function(){ const sel=document.getElementById('tuning'); Object.entries(TUNINGS).forEach(([k,v])=>{ const o=document.createElement('option'); o.value=k; o.textContent=v.label; sel.appendChild(o); }); sel.value=tuningKey; sel.onchange=()=>{ tuningKey=sel.value; try{localStorage.setItem('rifflab_tuning',tuningKey);}catch(e){} if(lastCap.length){ renderPlayed(lastCap); renderFretboard(lastCap, window.lastAnalysis); } }; })();
+
+// ---- fretboard practice (learn the neck) ----
+function renderChoices(){ document.getElementById('pracChoices').innerHTML=NOTE_NAMES.map((n,pc)=>`<button class="pchoice" data-pc="${pc}">${n}</button>`).join(''); }
+function renderQuizBoard(si,fret,reveal){
+  const host=document.getElementById('pracBoard'); if(!host) return;
+  const open=TUNINGS[tuningKey].open;
+  const NF=12, padL=54, padT=10, fw=42, sh=30, padR=14, padB=24, W=padL+NF*fw+padR, H=padT+6*sh+padB, rows=[5,4,3,2,1,0], FF='font-family="-apple-system,sans-serif"';
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
+  [3,5,7,9].forEach(f=>{ s+=`<circle cx="${padL+(f-0.5)*fw}" cy="${padT+3*sh}" r="5" fill="#20262f"/>`; });
+  s+=`<circle cx="${padL+11.5*fw}" cy="${padT+2*sh}" r="5" fill="#20262f"/><circle cx="${padL+11.5*fw}" cy="${padT+4*sh}" r="5" fill="#20262f"/>`;
+  for(let f=0;f<=NF;f++){ const x=padL+f*fw, nut=f===0; s+=`<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT+6*sh}" stroke="${nut?'#c9cfd8':'#2a313b'}" stroke-width="${nut?4:1.5}"/>`; }
+  rows.forEach((sidx,ri)=>{ const y=padT+ri*sh+sh/2; s+=`<line x1="${padL}" y1="${y}" x2="${padL+NF*fw}" y2="${y}" stroke="#39404c" stroke-width="${(1+(5-sidx)*0.35).toFixed(2)}"/><text x="16" y="${y+4}" fill="#7a8290" font-size="12" font-weight="600" ${FF}>${NOTE_NAMES[open[sidx]%12]}</text>`; });
+  for(let f=1;f<=NF;f++){ s+=`<text x="${padL+(f-0.5)*fw}" y="${padT+6*sh+16}" fill="#5f6773" font-size="10" text-anchor="middle" ${FF}>${f}</text>`; }
+  const ri=rows.indexOf(si), y=padT+ri*sh+sh/2, x=fret===0?(padL-16):(padL+(fret-0.5)*fw);
+  let fill='#ff5a1f', label='?'; if(reveal){ fill=reveal.correct?'#1d9e75':'#e24b4a'; label=reveal.noteName; }
+  s+=`<circle cx="${x}" cy="${y}" r="12" fill="${fill}"/><text x="${x}" y="${y+4}" fill="#fff" font-size="12" font-weight="800" text-anchor="middle" ${FF}>${label}</text>`;
+  host.innerHTML=s+`</svg>`;
+}
+let prac={si:0,fret:0,ans:-1,score:0,streak:0,answered:true};
+function pracNew(){ const open=TUNINGS[tuningKey].open; prac.si=Math.floor(Math.random()*6); prac.fret=Math.floor(Math.random()*13); prac.ans=((open[prac.si]+prac.fret)%12+12)%12; prac.answered=false; renderQuizBoard(prac.si,prac.fret,null); document.querySelectorAll('#pracChoices .pchoice').forEach(b=>b.disabled=false); document.getElementById('pracNext').disabled=true; document.getElementById('pracQ').textContent='What note is the marked position?'; }
+function pracAnswer(pc){ if(prac.answered) return; prac.answered=true; const ok=(pc===prac.ans); if(ok){ prac.score++; prac.streak++; } else { prac.streak=0; } document.getElementById('pracScore').textContent=`Correct ${prac.score} · streak ${prac.streak}`; renderQuizBoard(prac.si,prac.fret,{correct:ok,noteName:NOTE_NAMES[prac.ans]}); document.getElementById('pracQ').textContent = ok?'Correct!':`It was ${NOTE_NAMES[prac.ans]}`; document.querySelectorAll('#pracChoices .pchoice').forEach(b=>b.disabled=true); document.getElementById('pracNext').disabled=false; }
+document.getElementById('pracStart').onclick=()=>{ document.getElementById('practiceIdle').classList.add('hidden'); document.getElementById('practiceLive').classList.remove('hidden'); renderChoices(); prac.score=0; prac.streak=0; document.getElementById('pracScore').textContent='Correct 0 · streak 0'; pracNew(); };
+document.getElementById('pracStop').onclick=()=>{ document.getElementById('practiceLive').classList.add('hidden'); document.getElementById('practiceIdle').classList.remove('hidden'); };
+document.getElementById('pracNext').onclick=pracNew;
+document.getElementById('pracChoices').addEventListener('click',e=>{ const a=e.target.getAttribute&&e.target.getAttribute('data-pc'); if(a==null) return; pracAnswer(+a); });
 
 // ---- wiring ----
 document.getElementById('listen').onclick=startSession;
