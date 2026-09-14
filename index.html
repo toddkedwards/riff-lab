@@ -704,10 +704,54 @@ document.getElementById('jamStop').onclick=stopJam;
 const CQUAL={maj:[0,4,7],min:[0,3,7],dom7:[0,4,7,10],min7:[0,3,7,10],maj7:[0,4,7,11],dim:[0,3,6],sus4:[0,5,7]};
 const CLABEL={maj:'major',min:'minor',dom7:'7',min7:'m7',maj7:'maj7',dim:'dim',sus4:'sus4'};
 let chordCtx=null,chordStream=null,chordAn=null,chordRAF=null;
-function frameChroma(an){ const N=an.frequencyBinCount, data=new Float32Array(N); an.getFloatFrequencyData(data); const sr=chordCtx.sampleRate, fft=an.fftSize, chroma=new Array(12).fill(0); let energy=0; for(let i=1;i<N;i++){ const f=i*sr/fft; if(f<70||f>1600) continue; const db=data[i]; if(db<-75) continue; const mag=Math.pow(10,db/20); energy+=mag; const pc=((Math.round(12*Math.log2(f/16.3516))%12)+12)%12; chroma[pc]+=mag; } return {chroma,energy}; }
-function matchChord(chroma){ const mx=Math.max(...chroma)||1, c=chroma.map(v=>v/mx); let best=null; for(const q in CQUAL){ const ivs=CQUAL[q]; for(let root=0;root<12;root++){ const set=ivs.map(iv=>(root+iv)%12); let inS=0, missing=0; set.forEach((pc,k)=>{ const v=c[pc]; if(v>=0.25){ inS+=v*(k===0?1.3:k===1?1.15:1.0); } else { missing++; } }); let outS=0; for(let pc=0;pc<12;pc++) if(set.indexOf(pc)<0) outS+=c[pc]; const score=inS-0.6*outS-missing*0.8; if(!best||score>best.score) best={root,q,score,tones:set}; } } return best; }
-function captureChord(){ const st=document.getElementById('chordStatus'); if(st) st.textContent='Strum now…'; const acc=new Array(12).fill(0); let frames=0; const t0=performance.now(); const loop=()=>{ const fc=frameChroma(chordAn); if(fc.energy>0.0006){ for(let i=0;i<12;i++) acc[i]+=fc.chroma[i]; frames++; } if(performance.now()-t0<1700){ chordRAF=requestAnimationFrame(loop); } else { finishChord(acc,frames); } }; chordRAF=requestAnimationFrame(loop); }
-function finishChord(acc,frames){ const st=document.getElementById('chordStatus'); if(frames<4){ if(st) st.textContent='Didn’t catch a chord — hit Listen again and let it ring.'; document.getElementById('chordResult').innerHTML=''; document.getElementById('chordBoard').innerHTML=''; return; } const chroma=acc.map(v=>v/frames), best=matchChord(chroma); if(st) st.textContent='Detected chord'; document.getElementById('chordResult').innerHTML=`<span class="cname">${NOTE_NAMES[best.root]} <span class="accent">${CLABEL[best.q]}</span></span>`; window.lastChord=NOTE_NAMES[best.root]+' '+CLABEL[best.q]; renderJamBoard(new Set(best.tones), new Set(best.tones), 'chordBoard'); }
+// Chroma built from spectral PEAKS (not raw bins), sqrt-whitened and
+// low-frequency-weighted. Distortion piles energy into high harmonics and hash
+// between partials; peak-picking + whitening + a high-freq rolloff keep the
+// chroma anchored on the real fundamentals. Also returns the bass pitch class
+// (loudest low peak) — the strongest cue to the chord root on a distorted rig.
+function frameChroma(an){
+  const N=an.frequencyBinCount, data=new Float32Array(N); an.getFloatFrequencyData(data);
+  const sr=chordCtx.sampleRate, fft=an.fftSize, chroma=new Array(12).fill(0);
+  let energy=0, peaks=0, bass={pc:-1,m:0};
+  for(let i=2;i<N-2;i++){
+    const f=i*sr/fft; if(f<70||f>2000) continue;
+    const db=data[i]; if(db<-72) continue;
+    // local maximum = an actual partial, not distortion hash between partials
+    if(!(db>data[i-1]&&db>=data[i+1]&&db>data[i-2]&&db>=data[i+2])) continue;
+    const mag=Math.sqrt(Math.pow(10,db/20));                 // whitening: tame the loudest partials
+    const w=f<=500?1:(f<=1000?0.55:0.28);                     // de-emphasize the harmonic pile-up up high
+    const contrib=mag*w;
+    const pc=((Math.round(12*Math.log2(f/16.3516))%12)+12)%12;
+    chroma[pc]+=contrib; energy+=contrib; peaks++;
+    if(f>=70&&f<=300&&mag>bass.m) bass={pc,m:mag};            // bass fundamental = likely root
+  }
+  return {chroma,energy,peaks,bassPc:bass.pc};
+}
+function matchChord(chroma,bassPc){
+  const mx=Math.max(...chroma)||1, c=chroma.map(v=>v/mx); let best=null;
+  for(const q in CQUAL){ const ivs=CQUAL[q];
+    for(let root=0;root<12;root++){ const set=ivs.map(iv=>(root+iv)%12);
+      const m3=(root+4)%12, p5=(root+7)%12;
+      // subtract the root's own harmonic leakage before judging the third/fifth:
+      // its 5th harmonic fakes a major 3rd, its 3rd harmonic fakes a 5th.
+      const adj=pc=>{ let v=c[pc]; if(pc===m3) v-=0.32*c[root]; else if(pc===p5) v-=0.15*c[root]; return Math.max(0,v); };
+      let inS=0, missing=0;
+      // triad tones must clear a low gate; an added 7th/extension must clear a
+      // higher one, so a little b7 bleed doesn't upgrade a plain triad to a 7th.
+      set.forEach((pc,k)=>{ const v=adj(pc); const gate=k>=3?0.33:0.2; if(v>=gate){ inS+=v*(k===0?1.35:k===1?1.15:1.0); } else { missing++; } });
+      let outS=0; for(let pc=0;pc<12;pc++) if(set.indexOf(pc)<0) outS+=adj(pc);
+      let score=inS-0.6*outS-missing*0.8;
+      score+=0.5*c[root];                                      // the chord's root should actually be sounding
+      if(bassPc>=0&&root===bassPc) score+=0.7;                 // and the bass note is the strongest root cue
+      // a real major 3rd must clear what harmonics alone would explain
+      if((q==='maj'||q==='dom7'||q==='maj7') && (c[m3]-0.32*c[root])<0.12) score-=0.5;
+      if(!best||score>best.score) best={root,q,score,tones:set};
+    }
+  }
+  return best;
+}
+function captureChord(){ const st=document.getElementById('chordStatus'); if(st) st.textContent='Strum now…'; const acc=new Array(12).fill(0), bassVotes=new Array(12).fill(0); let frames=0; const t0=performance.now(); const loop=()=>{ const fc=frameChroma(chordAn); if(fc.energy>0&&fc.peaks>=3){ for(let i=0;i<12;i++) acc[i]+=fc.chroma[i]; if(fc.bassPc>=0) bassVotes[fc.bassPc]++; frames++; } if(performance.now()-t0<1700){ chordRAF=requestAnimationFrame(loop); } else { finishChord(acc,frames,bassVotes); } }; chordRAF=requestAnimationFrame(loop); }
+function finishChord(acc,frames,bassVotes){ const st=document.getElementById('chordStatus'); if(frames<4){ if(st) st.textContent='Didn’t catch a chord — hit Listen again and let it ring.'; document.getElementById('chordResult').innerHTML=''; document.getElementById('chordBoard').innerHTML=''; return; } const chroma=acc.map(v=>v/frames); let bassPc=-1,bv=0; (bassVotes||[]).forEach((n,pc)=>{ if(n>bv){ bv=n; bassPc=pc; } }); const best=matchChord(chroma,bassPc); if(st) st.textContent='Detected chord'; document.getElementById('chordResult').innerHTML=`<span class="cname">${NOTE_NAMES[best.root]} <span class="accent">${CLABEL[best.q]}</span></span>`; window.lastChord=NOTE_NAMES[best.root]+' '+CLABEL[best.q]; renderJamBoard(new Set(best.tones), new Set(best.tones), 'chordBoard'); }
 async function chordStart(){ try{ chordCtx=new (window.AudioContext||window.webkitAudioContext)(); await chordCtx.resume(); const id=document.getElementById('inDevice').value; const audio=Object.assign({echoCancellation:false,noiseSuppression:false,autoGainControl:false},id?{deviceId:{exact:id}}:{}); chordStream=await navigator.mediaDevices.getUserMedia({audio}); const src=chordCtx.createMediaStreamSource(chordStream); chordAn=chordCtx.createAnalyser(); chordAn.fftSize=8192; chordAn.smoothingTimeConstant=0.4; src.connect(chordAn); document.getElementById('chordIdle').classList.add('hidden'); document.getElementById('chordLive').classList.remove('hidden'); captureChord(); }catch(e){ document.getElementById('chordIdle').classList.remove('hidden'); document.getElementById('chordLive').classList.add('hidden'); } }
 function chordStop(){ if(chordRAF) cancelAnimationFrame(chordRAF); chordRAF=null; if(chordStream){ chordStream.getTracks().forEach(t=>t.stop()); chordStream=null; } if(chordCtx){ try{chordCtx.close();}catch(e){} chordCtx=null; } document.getElementById('chordLive').classList.add('hidden'); document.getElementById('chordIdle').classList.remove('hidden'); }
 document.getElementById('chordListen').onclick=chordStart;
@@ -795,14 +839,9 @@ refreshDevices(); initMIDI(); renderLibrary();
     if(!text){ setStatus('Add a note first.','err'); msg.focus(); return; }
     const stop=throttleReason(); if(stop){ setStatus(stop,'err'); return; }
     sendBtn.disabled=true; setStatus('Sending…');
-    // breadcrumb folded into the message (the shared table's optional `screen`
-    // column isn't in prod; the RN twin omits it too). Keeps triage context
-    // without depending on a column that may not exist.
-    const crumb='\n\n— sent from the '+currentScreen()+' tab · '+browser();
-    const message=(text.slice(0,4000-crumb.length)+crumb);
     const body={ app_name:APP, app_version:'web', build:'web', os_version:('Web · '+(navigator.platform||'')).slice(0,32),
       device_model:browser().slice(0,64), locale:(()=>{try{return Intl.DateTimeFormat().resolvedOptions().locale;}catch(e){return 'unknown';}})(),
-      type, message, email:email.value.trim()||null, client_sent_at:new Date().toISOString() };
+      type, message:text.slice(0,4000), email:email.value.trim()||null, screen:currentScreen(), client_sent_at:new Date().toISOString() };
     try{
       const r=await fetch(FB_URL,{ method:'POST', headers:{ apikey:FB_KEY, Authorization:'Bearer '+FB_KEY, 'Content-Type':'application/json', Prefer:'return=minimal' }, body:JSON.stringify(body) });
       if(r.ok){ recordSend(); setStatus('Sent — thank you.','ok'); msg.value=''; email.value=''; setTimeout(close,900); }
