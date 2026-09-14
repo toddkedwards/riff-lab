@@ -43,6 +43,7 @@
   .chip select,.chip input{background:transparent;border:0;color:var(--ink);font:600 12px inherit;padding:2px}
   .chip input{width:44px}
   .chip select{outline:none;max-width:170px}
+  .metbadge{color:var(--accent);border-color:rgba(255,90,31,.4);background:rgba(255,90,31,.08);font-weight:600}
   .hint{font-size:12px;color:var(--muted);margin:10px 2px 0;line-height:1.5}
 
   .segwrap{display:flex;gap:6px;margin-top:24px}
@@ -131,6 +132,16 @@
 
   <div class="chips">
     <label class="chip">Tempo <input type="number" id="bpm" value="100" min="40" max="240"/></label>
+    <label class="chip">Meter
+      <select id="meter">
+        <option value="auto" selected>Auto</option>
+        <option value="4/4">4/4</option>
+        <option value="3/4">3/4</option>
+        <option value="2/4">2/4</option>
+        <option value="6/8">6/8</option>
+      </select>
+    </label>
+    <span class="chip metbadge" id="meterOut" style="display:none"></span>
   </div>
   <div class="hint">Tip: “Default input” (in the header) is your computer mic, fine for an acoustic. Pick your interface for electric.</div>
 
@@ -308,6 +319,51 @@ function fillDurations(cap){
   }
 }
 
+// quantized beat length per note + cumulative starts (in quarter-note beats)
+function beatGrid(cap,bpm){
+  let tb=0; const durs=[], starts=[];
+  for(const c of cap){ const d=durToVex(c.dur||500,bpm); starts.push(tb); durs.push(d); tb+=BEATS[d]; }
+  return {durs,starts,tb};
+}
+// Meter auto-detection: infer beats-per-bar from where the onsets land.
+// Scores 2/4, 3/4, 4/4 by (a) how evenly the phrase divides into bars and
+// (b) how much of the played weight falls on each meter's strong beats.
+// Returns {num,den,label,auto}. Compound (6/8) is manual-only — our quantizer
+// doesn't resolve triplet/dotted feel, so auto-guessing it would be dishonest.
+function detectMeter(cap,bpm){
+  const g=beatGrid(cap,bpm); const {durs,starts,tb}=g;
+  if(cap.length<3||tb<2) return {num:4,den:4,label:'4/4',auto:true,conf:0};
+  const totalDur=durs.reduce((s,d)=>s+BEATS[d],0)||1;
+  const cands=[{M:2,prior:0.00},{M:3,prior:0.03},{M:4,prior:0.09}];
+  let best=null;
+  for(const {M,prior} of cands){
+    const r=((tb%M)+M)%M; const even=Math.max(0,1-Math.min(r,M-r)/(M/2));
+    let strong=0;
+    for(let i=0;i<starts.length;i++){
+      const s=starts[i]; const near=Math.abs(s-Math.round(s))<0.2; if(!near) continue;
+      const pos=((Math.round(s)%M)+M)%M; let w=0;
+      if(pos===0) w=1.0; else if(M===4&&pos===2) w=0.5;
+      strong+=w*BEATS[durs[i]];
+    }
+    strong/=totalDur;
+    const score=0.5*even+0.5*strong+prior;
+    if(!best||score>best.score) best={M,score,even,strong};
+  }
+  // confidence = margin the winner has; low margin still returns the winner but flags it
+  return {num:best.M,den:4,label:best.M+'/4',auto:true,conf:best.score};
+}
+function currentMeter(cap,bpm){
+  const sel=(document.getElementById('meter')||{}).value||'auto';
+  if(sel==='auto'){ const m=detectMeter(cap,bpm); m.picked='auto'; return m; }
+  const [n,d]=sel.split('/').map(Number);
+  return {num:n,den:d,label:sel,auto:false,picked:sel};
+}
+
+function updateMeterBadge(met){
+  const el=document.getElementById('meterOut'); if(!el) return;
+  if(met.auto){ el.textContent='detected '+met.label; el.style.display='inline-flex'; }
+  else { el.style.display='none'; }
+}
 let lastCap=[];
 function renderPlayed(cap){
   document.getElementById('played').textContent = cap.length ? cap.map(c=>midiName(c.midi)).join('   ') : '—';
@@ -334,13 +390,19 @@ function renderStaff(cap){
     const height = showTab ? tabY+tabRegion : noteBottom+30;
     const renderer=new VF.Renderer(div,VF.Renderer.Backends.SVG); renderer.resize(width,height);
     const ctx=renderer.getContext();
-    let tb=0; const durs=cap.map(c=>{ const d=durToVex(c.dur||500,bpm); tb+=BEATS[d]; return d; });
+    const grid=beatGrid(cap,bpm); const durs=grid.durs, starts=grid.starts, tb=grid.tb;
     const nb=Math.max(1,Math.ceil(tb));
+    const met=currentMeter(cap,bpm);
+    // bar length in quarter-note beats (6/8 = two dotted-quarter beats = 3 quarters)
+    const barBeats = met.den===8 ? met.num/2 : met.num;
+    updateMeterBadge(met);
+    // insert a barline tickable before any note that starts on a bar boundary
+    const withBars=(make)=>{ const out=[]; for(let i=0;i<cap.length;i++){ if(i>0&&barBeats){ const k=starts[i]/barBeats; if(Math.round(k)>=1&&Math.abs(k-Math.round(k))<0.06) out.push(new VF.BarNote()); } out.push(make(i)); } return out; };
     const voices=[]; let stave,tabStave,nVoice,tVoice;
     if(showNote){
-      stave=new VF.Stave(10,topPad,width-20); stave.addClef('treble').addTimeSignature('4/4'); stave.setContext(ctx).draw();
+      stave=new VF.Stave(10,topPad,width-20); stave.addClef('treble').addTimeSignature(met.label); stave.setContext(ctx).draw();
       nVoice=new VF.Voice({num_beats:nb,beat_value:4}).setStrict(false);
-      nVoice.addTickables(cap.map((c,i)=> new VF.StaveNote({keys:[midiToVexKey(c.midi)],duration:durs[i]})));
+      nVoice.addTickables(withBars(i=> new VF.StaveNote({keys:[midiToVexKey(cap[i].midi)],duration:durs[i]})));
       try{ VF.Accidental.applyAccidentals([nVoice],'C'); }catch(e){}
       voices.push(nVoice);
     }
@@ -348,7 +410,7 @@ function renderStaff(cap){
       tabStave=new VF.TabStave(10,tabY,width-20); tabStave.addClef('tab').setContext(ctx).draw();
       tVoice=new VF.Voice({num_beats:nb,beat_value:4}).setStrict(false);
       const tpos=tabSequence(cap.map(c=>c.midi));
-      tVoice.addTickables(cap.map((c,i)=>{ const p=tpos[i]; return new VF.TabNote({positions:[{str:p.str,fret:p.fret}],duration:durs[i]}); }));
+      tVoice.addTickables(withBars(i=>{ const p=tpos[i]; return new VF.TabNote({positions:[{str:p.str,fret:p.fret}],duration:durs[i]}); }));
       voices.push(tVoice);
     }
     const fmt=new VF.Formatter(); voices.forEach(v=>fmt.joinVoices([v])); fmt.format(voices,width-100);
@@ -667,6 +729,7 @@ document.getElementById('listen').onclick=startSession;
 document.getElementById('stop').onclick=()=>stopSession(true);
 document.getElementById('clear').onclick=()=>{ captured=[]; document.getElementById('played').textContent='—'; document.getElementById('tab').textContent=''; document.getElementById('staff').innerHTML=''; const fb=document.getElementById('fretboard'); if(fb) fb.innerHTML=''; document.getElementById('result').classList.add('hidden'); };
 document.getElementById('bpm').onchange=()=>{ if(lastCap.length) renderStaff(lastCap); };
+document.getElementById('meter').onchange=()=>{ if(lastCap.length) renderStaff(lastCap); };
 refreshDevices(); initMIDI(); renderLibrary();
 </script>
 </body>
