@@ -94,6 +94,22 @@
   .keyin:focus{outline:none;border-color:var(--accent)}
   .tchips{display:flex;gap:6px;flex-wrap:wrap}
   .tout{margin-top:16px;font-size:15px;line-height:1.65;white-space:pre-wrap;min-height:6px}
+  .fbbtn{cursor:pointer;color:var(--accent);border-color:rgba(255,90,31,.4);background:rgba(255,90,31,.08);font-weight:700}
+  .fbbtn:hover{background:rgba(255,90,31,.16)}
+  .fbback{position:fixed;inset:0;background:rgba(6,8,11,.72);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50}
+  .fbcard{width:100%;max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .fbhead{display:flex;align-items:center;justify-content:space-between}
+  .fbtitle{font-size:18px;font-weight:800;letter-spacing:-.01em}
+  .fbx{background:transparent;color:var(--muted);font-size:24px;line-height:1;border:0;cursor:pointer;padding:0 4px}
+  .fbsub{color:var(--muted);font-size:13px;line-height:1.5;margin:6px 0 14px}
+  .fbtypes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .fbtype{background:var(--panel2);color:#cbd2db;border:1px solid var(--line);border-radius:20px;padding:7px 14px;font:600 13px inherit;cursor:pointer}
+  .fbtype.on{background:rgba(255,90,31,.14);color:var(--accent);border-color:rgba(255,90,31,.5)}
+  .fbtext,.fbemail{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:400 14px inherit;padding:11px 12px;resize:vertical}
+  .fbtext{margin-bottom:10px} .fbtext:focus,.fbemail:focus{outline:none;border-color:rgba(255,90,31,.55)}
+  .fbfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .fbactions{display:flex;gap:8px;margin-left:auto}
+  .fbstatus{font-size:13px;color:var(--muted)} .fbstatus.ok{color:#3ecf8e} .fbstatus.err{color:#ff6b5a}
 </style>
 </head>
 <body>
@@ -103,6 +119,7 @@
     <div class="gctrls">
       <label class="chip">Input <select id="inDevice"><option value="">Default input (mic)</option></select></label>
       <label class="chip">Tuning <select id="tuning"></select></label>
+      <button type="button" class="chip fbbtn" id="fbOpen" title="Send feedback">✦ Feedback</button>
     </div>
   </div>
 
@@ -249,6 +266,25 @@
     <div id="ideaList"></div>
   </div>
   </section>
+</div>
+
+<div class="fbback" id="fbBack" hidden>
+  <div class="fbcard" role="dialog" aria-modal="true" aria-label="Send feedback">
+    <div class="fbhead"><div class="fbtitle">Send feedback</div><button type="button" class="fbx" id="fbClose" aria-label="Close">×</button></div>
+    <div class="fbsub">Tell me what's working, what's broken, or what you wish it did. Goes straight to the builder.</div>
+    <div class="fbtypes" id="fbTypes">
+      <button type="button" class="fbtype on" data-t="idea">Idea</button>
+      <button type="button" class="fbtype" data-t="bug">Bug</button>
+      <button type="button" class="fbtype" data-t="praise">Praise</button>
+      <button type="button" class="fbtype" data-t="question">Question</button>
+    </div>
+    <textarea id="fbMsg" class="fbtext" rows="4" maxlength="4000" placeholder="What would you like to say?"></textarea>
+    <input id="fbEmail" class="fbemail" type="email" placeholder="Email (optional — only if you want a reply)" maxlength="254"/>
+    <div class="fbfoot">
+      <div class="fbstatus" id="fbStatus"></div>
+      <div class="fbactions"><button type="button" class="btn ghost" id="fbCancel">Cancel</button><button type="button" class="btn" id="fbSend">Send</button></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -731,6 +767,56 @@ document.getElementById('clear').onclick=()=>{ captured=[]; document.getElementB
 document.getElementById('bpm').onchange=()=>{ if(lastCap.length) renderStaff(lastCap); };
 document.getElementById('meter').onchange=()=>{ if(lastCap.length) renderStaff(lastCap); };
 refreshDevices(); initMIDI(); renderLibrary();
+
+// ---- lightweight feedback capture ----
+// Posts to the shared Black Beacon FeedbackKit table (INSERT-ONLY for anon;
+// the publishable key is meant to ship client-side and can only insert).
+// app_name separates Riff Lab from the other apps. Mirrors the RN twin.
+(function(){
+  const FB_URL='https://fazrbdesobxbuibsrwdl.supabase.co/rest/v1/feedback';
+  const FB_KEY='sb_publishable_1HAnxLUdwbMtyp0gwHJYcQ_1RWdq82H';
+  const APP='Riff Lab';
+  const MIN_INTERVAL=30000, MAX_PER_DAY=10, TIMES_KEY='rifflab_fb_times';
+  const back=document.getElementById('fbBack'), msg=document.getElementById('fbMsg'),
+        email=document.getElementById('fbEmail'), statusEl=document.getElementById('fbStatus'),
+        sendBtn=document.getElementById('fbSend');
+  let type='idea';
+  const setStatus=(t,cls)=>{ statusEl.textContent=t||''; statusEl.className='fbstatus'+(cls?' '+cls:''); };
+  function open(){ setStatus(''); back.hidden=false; setTimeout(()=>msg.focus(),30); }
+  function close(){ back.hidden=true; }
+  function currentScreen(){ const t=document.querySelector('#tabbar .tabbtn.on'); const map={play:'Play',fretboard:'Fretboard',jam:'Jam',chords:'Chords',tutor:'Tutor',ideas:'Ideas'}; return (t&&map[t.dataset.tab])||'Play'; }
+  function browser(){ const u=navigator.userAgent; let b='Web'; if(/Edg\//.test(u))b='Edge'; else if(/Chrome\//.test(u))b='Chrome'; else if(/Safari\//.test(u))b='Safari'; else if(/Firefox\//.test(u))b='Firefox'; return b; }
+  function times(){ try{ return JSON.parse(localStorage.getItem(TIMES_KEY)||'[]'); }catch(e){ return []; } }
+  function throttleReason(){ const now=Date.now(), t=times(); const recent=t.filter(x=>now-x<86400000); if(recent.length>=MAX_PER_DAY) return "That's a lot of feedback for one day — thank you! Try again tomorrow."; if(t.length&&now-Math.max(...t)<MIN_INTERVAL) return 'One moment — give it a few seconds between sends.'; return null; }
+  function recordSend(){ const now=Date.now(); const t=times().filter(x=>now-x<86400000); t.push(now); try{ localStorage.setItem(TIMES_KEY,JSON.stringify(t)); }catch(e){} }
+  document.getElementById('fbTypes').addEventListener('click',e=>{ const b=e.target.closest('.fbtype'); if(!b) return; type=b.dataset.t; document.querySelectorAll('.fbtype').forEach(x=>x.classList.toggle('on',x===b)); });
+  async function send(){
+    const text=msg.value.trim();
+    if(!text){ setStatus('Add a note first.','err'); msg.focus(); return; }
+    const stop=throttleReason(); if(stop){ setStatus(stop,'err'); return; }
+    sendBtn.disabled=true; setStatus('Sending…');
+    // breadcrumb folded into the message (the shared table's optional `screen`
+    // column isn't in prod; the RN twin omits it too). Keeps triage context
+    // without depending on a column that may not exist.
+    const crumb='\n\n— sent from the '+currentScreen()+' tab · '+browser();
+    const message=(text.slice(0,4000-crumb.length)+crumb);
+    const body={ app_name:APP, app_version:'web', build:'web', os_version:('Web · '+(navigator.platform||'')).slice(0,32),
+      device_model:browser().slice(0,64), locale:(()=>{try{return Intl.DateTimeFormat().resolvedOptions().locale;}catch(e){return 'unknown';}})(),
+      type, message, email:email.value.trim()||null, client_sent_at:new Date().toISOString() };
+    try{
+      const r=await fetch(FB_URL,{ method:'POST', headers:{ apikey:FB_KEY, Authorization:'Bearer '+FB_KEY, 'Content-Type':'application/json', Prefer:'return=minimal' }, body:JSON.stringify(body) });
+      if(r.ok){ recordSend(); setStatus('Sent — thank you.','ok'); msg.value=''; email.value=''; setTimeout(close,900); }
+      else{ const t=await r.text().catch(()=>''); setStatus('Could not send'+(r.status?(' ('+r.status+')'):'')+'. '+ (t?t.slice(0,80):'Please try again.'),'err'); }
+    }catch(e){ setStatus('No connection — check your network and try again.','err'); }
+    finally{ sendBtn.disabled=false; }
+  }
+  document.getElementById('fbOpen').onclick=open;
+  document.getElementById('fbClose').onclick=close;
+  document.getElementById('fbCancel').onclick=close;
+  sendBtn.onclick=send;
+  back.addEventListener('click',e=>{ if(e.target===back) close(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!back.hidden) close(); if((e.metaKey||e.ctrlKey)&&e.key==='Enter'&&!back.hidden) send(); });
+})();
 </script>
 </body>
 </html>
